@@ -1876,6 +1876,19 @@ static int m88ds3103_probe(struct i2c_client *client,
 	/* setup callbacks */
 	pdata->get_dvb_frontend = m88ds3103_get_dvb_frontend;
 	pdata->get_i2c_adapter = m88ds3103_get_i2c_adapter;
+
+	if (dev->chiptype == M88DS3103_CHIPTYPE_3103B) {
+		/* enable i2c repeater for tuner */
+		m88ds3103_update_bits(dev, 0x11, 0x01, 0x01);
+
+		/* get frontend address */
+		ret = regmap_read(dev->regmap, 0x29, &utmp);
+		if (ret)
+			goto err_kfree;
+		dev->dt_addr = ((utmp & 0x80) == 0) ? 0x42 >> 1 : 0x40 >> 1;
+		dev_err(&client->dev, "dt addr is 0x%02x", dev->dt_addr);
+	}
+
 	return 0;
 err_kfree:
 	kfree(dev);
