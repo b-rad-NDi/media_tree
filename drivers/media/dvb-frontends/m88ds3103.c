@@ -85,7 +85,7 @@ static int m88ds3103b_dt_write(struct m88ds3103_dev *dev, int reg, int data)
 	if (ret)
 		dev_dbg(&client->dev, "fail=%d\n", ret);
 
-	ret = i2c_transfer(dev->client->adapter, &msg, 1);
+	ret = i2c_transfer(dev->dt_client->adapter, &msg, 1);
 	if (ret != 1) {
 		dev_dbg(&client->dev, "0x%02x (ret=%i, reg=0x%02x, value=0x%02x)\n",
 			dev->dt_addr, ret, reg, data);
@@ -134,7 +134,7 @@ static int m88ds3103b_dt_read(struct m88ds3103_dev *dev, u8 reg)
 	if (ret)
 		dev_dbg(&client->dev, "fail=%d\n", ret);
 
-	ret = i2c_transfer(dev->client->adapter, msg, 2);
+	ret = i2c_transfer(dev->dt_client->adapter, msg, 2);
 	if (ret != 2) {
 		dev_dbg(&client->dev, "0x%02x (err=%d, reg=0x%02x)\n",
 			dev->dt_addr, ret, reg);
@@ -1897,6 +1897,12 @@ static int m88ds3103_probe(struct i2c_client *client,
 			goto err_kfree;
 		dev->dt_addr = ((utmp & 0x80) == 0) ? 0x42 >> 1 : 0x40 >> 1;
 		dev_err(&client->dev, "dt addr is 0x%02x", dev->dt_addr);
+
+		dev->dt_client = i2c_new_dummy(client->adapter, dev->dt_addr);
+		if (!dev->dt_client) {
+			ret = -ENODEV;
+			goto err_kfree;
+		}
 	}
 
 	return 0;
@@ -1912,6 +1918,8 @@ static int m88ds3103_remove(struct i2c_client *client)
 	struct m88ds3103_dev *dev = i2c_get_clientdata(client);
 
 	dev_dbg(&client->dev, "\n");
+
+	i2c_unregister_device(dev->dt_client);
 
 	i2c_mux_del_adapters(dev->muxc);
 

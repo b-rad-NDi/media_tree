@@ -29,6 +29,7 @@
 
 struct m88ds3103_dev {
 	struct i2c_client *client;
+	struct i2c_client *dt_client;
 	struct regmap_config regmap_config;
 	struct regmap *regmap;
 	struct m88ds3103_config config;
