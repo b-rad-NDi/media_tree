@@ -86,8 +86,9 @@ static int m88ds3103b_dt_write(struct m88ds3103_dev *dev, int reg, int data)
 		dev_dbg(&client->dev, "fail=%d\n", ret);
 
 	ret = i2c_transfer(dev->dt_client->adapter, &msg, 1);
+//	ret = i2c_transfer(dev->client->adapter, &msg, 1);
 	if (ret != 1) {
-		dev_dbg(&client->dev, "0x%02x (ret=%i, reg=0x%02x, value=0x%02x)\n",
+		dev_err(&client->dev, "0x%02x (ret=%i, reg=0x%02x, value=0x%02x)\n",
 			dev->dt_addr, ret, reg, data);
 
 		m88ds3103_update_bits(dev, 0x11, 0x01, 0x01);
@@ -135,8 +136,9 @@ static int m88ds3103b_dt_read(struct m88ds3103_dev *dev, u8 reg)
 		dev_dbg(&client->dev, "fail=%d\n", ret);
 
 	ret = i2c_transfer(dev->dt_client->adapter, msg, 2);
+//	ret = i2c_transfer(dev->client->adapter, msg, 2);
 	if (ret != 2) {
-		dev_dbg(&client->dev, "0x%02x (err=%d, reg=0x%02x)\n",
+		dev_err(&client->dev, "0x%02x (ret=%d, reg=0x%02x)\n",
 			dev->dt_addr, ret, reg);
 
 		m88ds3103_update_bits(dev, 0x11, 0x01, 0x01);
@@ -1057,7 +1059,7 @@ static int m88ds3103_init(struct dvb_frontend *fe)
 
 	/* cold state - try to download firmware */
 	dev_info(&client->dev, "found a '%s' in cold state\n",
-		 m88ds3103_ops.info.name);
+		 dev->fe.ops.info.name);
 
 	if (dev->chiptype == M88DS3103_CHIPTYPE_3103B)
 		name = M88DS3103B_FIRMWARE;
@@ -1108,7 +1110,7 @@ static int m88ds3103_init(struct dvb_frontend *fe)
 	}
 
 	dev_info(&client->dev, "found a '%s' in warm state\n",
-		 m88ds3103_ops.info.name);
+		 dev->fe.ops.info.name);
 	dev_info(&client->dev, "firmware version: %X.%X\n",
 		 (utmp >> 4) & 0xf, (utmp >> 0 & 0xf));
 
@@ -1875,7 +1877,10 @@ static int m88ds3103_probe(struct i2c_client *client,
 
 	/* create dvb_frontend */
 	memcpy(&dev->fe.ops, &m88ds3103_ops, sizeof(struct dvb_frontend_ops));
-	if (dev->chip_id == M88RS6000_CHIP_ID)
+	if (dev->chiptype == M88DS3103_CHIPTYPE_3103B)
+		strscpy(dev->fe.ops.info.name, "Montage Technology M88DS3103B",
+			sizeof(dev->fe.ops.info.name));
+	else if (dev->chip_id == M88RS6000_CHIP_ID)
 		strscpy(dev->fe.ops.info.name, "Montage Technology M88RS6000",
 			sizeof(dev->fe.ops.info.name));
 	if (!pdata->attach_in_use)
@@ -1919,7 +1924,8 @@ static int m88ds3103_remove(struct i2c_client *client)
 
 	dev_dbg(&client->dev, "\n");
 
-	i2c_unregister_device(dev->dt_client);
+	if (dev->dt_client)
+		i2c_unregister_device(dev->dt_client);
 
 	i2c_mux_del_adapters(dev->muxc);
 
