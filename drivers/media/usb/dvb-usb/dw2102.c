@@ -1587,9 +1587,9 @@ static int tt_s2_4600_frontend_attach(struct dvb_usb_adapter *adap)
 	m88ds3103_pdata.lnb_en_pol = 0;
 	memset(&board_info, 0, sizeof(board_info));
 	strscpy(board_info.type, "m88ds3103", I2C_NAME_SIZE);
-	board_info.addr = 0x68;
+	board_info.addr = 0x6a;
 	board_info.platform_data = &m88ds3103_pdata;
-	request_module("m88ds3103");
+	request_module("m88ds3103b");
 	client = i2c_new_device(&d->i2c_adap, &board_info);
 	if (client == NULL || client->dev.driver == NULL)
 		return -ENODEV;
