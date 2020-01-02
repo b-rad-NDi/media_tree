@@ -1047,7 +1047,7 @@ static int m88ds3103_init(struct dvb_frontend *fe)
 	if (utmp)
 		goto warm;
 
-	/* global reset, global diseqc reset, golbal fec reset */
+	/* global reset, global diseqc reset, global fec reset */
 	ret = regmap_write(dev->regmap, 0x07, 0xe0);
 	if (ret)
 		goto err;
