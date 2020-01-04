@@ -1589,6 +1589,9 @@ static int tt_s2_4600_frontend_attach(struct dvb_usb_adapter *adap)
 	strscpy(board_info.type, "m88ds3103", I2C_NAME_SIZE);
 	board_info.addr = 0x68;
 	board_info.platform_data = &m88ds3103_pdata;
+
+	info("%s: attaching demodulator of type %s at i2c address 0x%x", __func__, board_info.type, board_info.addr);
+
 	request_module("m88ds3103");
 	client = i2c_new_device(&d->i2c_adap, &board_info);
 	if (client == NULL || client->dev.driver == NULL)
