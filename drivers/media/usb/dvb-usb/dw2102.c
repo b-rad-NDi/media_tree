@@ -1544,14 +1544,18 @@ static int tt_s2_4600_frontend_attach(struct dvb_usb_adapter *adap)
 	state->data[2] = 0x0;
 
 	if (dvb_usb_generic_rw(d, state->data, 3, state->data, 1, 0) < 0)
-		err("command 0x0e transfer failed.");
+		err("command 0x0e 80 00 transfer failed.");
+	if(state->data[0] != 1)
+		err("command 0x0e 80 00 reply unexpected.");
 
 	state->data[0] = 0xe;
 	state->data[1] = 0x02;
 	state->data[2] = 1;
 
 	if (dvb_usb_generic_rw(d, state->data, 3, state->data, 1, 0) < 0)
-		err("command 0x0e transfer failed.");
+		err("command 0x0e 02 01 transfer failed.");
+	if(state->data[0] != 1)
+		err("command 0x0e 02 01 reply unexpected.");
 	msleep(300);
 
 	state->data[0] = 0xe;
@@ -1559,19 +1563,25 @@ static int tt_s2_4600_frontend_attach(struct dvb_usb_adapter *adap)
 	state->data[2] = 0;
 
 	if (dvb_usb_generic_rw(d, state->data, 3, state->data, 1, 0) < 0)
-		err("command 0x0e transfer failed.");
+		err("command 0x0e 83 00 transfer failed.");
+	if(state->data[0] != 1)
+		err("command 0x0e 83 00 reply unexpected.");
 
 	state->data[0] = 0xe;
 	state->data[1] = 0x83;
 	state->data[2] = 1;
 
 	if (dvb_usb_generic_rw(d, state->data, 3, state->data, 1, 0) < 0)
-		err("command 0x0e transfer failed.");
+		err("command 0x0e 83 01 transfer failed.");
+	if(state->data[0] != 1)
+		err("command 0x0e 83 01 reply unexpected.");
 
 	state->data[0] = 0x51;
 
 	if (dvb_usb_generic_rw(d, state->data, 1, state->data, 1, 0) < 0)
 		err("command 0x51 transfer failed.");
+	if(state->data[0] != 1)
+		err("command 0x51 reply unexpected.");
 
 	mutex_unlock(&d->data_mutex);
 
