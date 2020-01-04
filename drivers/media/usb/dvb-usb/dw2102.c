@@ -770,6 +770,9 @@ static int su3000_i2c_transfer(struct i2c_adapter *adap, struct i2c_msg msg[],
 					state->data, msg[1].len + 1, 0) < 0)
 			err("i2c transfer failed.");
 
+		if (state->data[0] != 8)
+		   warn("i2c read request failed: i2c status %d", state->data[0]);
+
 		memcpy(msg[1].buf, &state->data[1], msg[1].len);
 		break;
 	default:
