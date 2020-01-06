@@ -1232,10 +1232,10 @@ static int em28178_dvb_init_pctv_461e_v2(struct em28xx *dev)
 	m88ds3103_pdata.i2c_wr_max = 33;
 	m88ds3103_pdata.ts_mode = M88DS3103_TS_PARALLEL;
 	m88ds3103_pdata.ts_clk = 16000;
-	m88ds3103_pdata.ts_clk_pol = 1;
+	m88ds3103_pdata.ts_clk_pol = 0;
 	m88ds3103_pdata.agc = 0x99;
-	m88ds3103_pdata.agc_inv = 1;
-	m88ds3103_pdata.spec_inv = 1;
+	m88ds3103_pdata.agc_inv = 0;
+	m88ds3103_pdata.spec_inv = 0;
 	dvb->i2c_client_demod = dvb_module_probe("m88ds3103", "m88ds3103b",
 						 &dev->i2c_adap[dev->def_i2c_bus],
 						 0x6a, &m88ds3103_pdata);
