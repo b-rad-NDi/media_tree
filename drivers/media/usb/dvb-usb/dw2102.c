@@ -770,6 +770,9 @@ static int su3000_i2c_transfer(struct i2c_adapter *adap, struct i2c_msg msg[],
 					state->data, msg[1].len + 1, 0) < 0)
 			err("i2c transfer failed.");
 
+		if (state->data[0] != 8)
+		   warn("i2c read request failed: i2c status %d", state->data[0]);
+
 		memcpy(msg[1].buf, &state->data[1], msg[1].len);
 		break;
 	default:
@@ -1524,6 +1527,28 @@ static int m88rs2000_frontend_attach(struct dvb_usb_adapter *adap)
 	return -EIO;
 }
 
+static int tt_s2_4600_frontend_attach_probe_demod(struct dvb_usb_device *d, const int probe_addr)
+{
+	struct dw2102_state *state = d->priv;
+
+	state->data[0] = 0x9;
+	state->data[1] = 0x1;
+	state->data[2] = 0x1;
+	state->data[3] = probe_addr;
+	state->data[4] = 0x0;
+
+	if (dvb_usb_generic_rw(d, state->data, 5, state->data, 2, 0) < 0)
+	{
+		err("i2c probe for address 0x%x failed.", probe_addr);
+		return 0;
+	}
+	if(state->data[0] != 8)
+		/* failure (7) or error, no device at this address */
+		return 0;
+	/* probing successful */
+	return 1;
+}
+
 static int tt_s2_4600_frontend_attach(struct dvb_usb_adapter *adap)
 {
 	struct dvb_usb_device *d = adap->dev;
@@ -1533,6 +1558,7 @@ static int tt_s2_4600_frontend_attach(struct dvb_usb_adapter *adap)
 	struct i2c_board_info board_info;
 	struct m88ds3103_platform_data m88ds3103_pdata = {};
 	struct ts2020_config ts2020_config = {};
+	int demod_addr;
 
 	mutex_lock(&d->data_mutex);
 
@@ -1541,14 +1567,18 @@ static int tt_s2_4600_frontend_attach(struct dvb_usb_adapter *adap)
 	state->data[2] = 0x0;
 
 	if (dvb_usb_generic_rw(d, state->data, 3, state->data, 1, 0) < 0)
-		err("command 0x0e transfer failed.");
+		err("command 0x0e 80 00 transfer failed.");
+	if(state->data[0] != 1)
+		err("command 0x0e 80 00 reply unexpected.");
 
 	state->data[0] = 0xe;
 	state->data[1] = 0x02;
 	state->data[2] = 1;
 
 	if (dvb_usb_generic_rw(d, state->data, 3, state->data, 1, 0) < 0)
-		err("command 0x0e transfer failed.");
+		err("command 0x0e 02 01 transfer failed.");
+	if(state->data[0] != 1)
+		err("command 0x0e 02 01 reply unexpected.");
 	msleep(300);
 
 	state->data[0] = 0xe;
@@ -1556,21 +1586,42 @@ static int tt_s2_4600_frontend_attach(struct dvb_usb_adapter *adap)
 	state->data[2] = 0;
 
 	if (dvb_usb_generic_rw(d, state->data, 3, state->data, 1, 0) < 0)
-		err("command 0x0e transfer failed.");
+		err("command 0x0e 83 00 transfer failed.");
+	if(state->data[0] != 1)
+		err("command 0x0e 83 00 reply unexpected.");
 
 	state->data[0] = 0xe;
 	state->data[1] = 0x83;
 	state->data[2] = 1;
 
 	if (dvb_usb_generic_rw(d, state->data, 3, state->data, 1, 0) < 0)
-		err("command 0x0e transfer failed.");
+		err("command 0x0e 83 01 transfer failed.");
+	if(state->data[0] != 1)
+		err("command 0x0e 83 01 reply unexpected.");
 
 	state->data[0] = 0x51;
 
 	if (dvb_usb_generic_rw(d, state->data, 1, state->data, 1, 0) < 0)
 		err("command 0x51 transfer failed.");
+	if(state->data[0] != 1)
+		err("command 0x51 reply unexpected.");
+
+	/* probe for demodulator i2c address */
+	demod_addr = -1;
+	if(tt_s2_4600_frontend_attach_probe_demod(d, 0x68))
+		demod_addr = 0x68;
+	else if(tt_s2_4600_frontend_attach_probe_demod(d, 0x69))
+		demod_addr = 0x69;
+	else if(tt_s2_4600_frontend_attach_probe_demod(d, 0x6a))
+		demod_addr = 0x6a;
 
 	mutex_unlock(&d->data_mutex);
+
+	if(demod_addr < 0)
+	{
+		err("probing for demodulator failed.  Is the external power switched on?");
+		return -ENODEV;
+	}
 
 	/* attach demod */
 	m88ds3103_pdata.clk = 27000000;
@@ -1586,9 +1637,15 @@ static int tt_s2_4600_frontend_attach(struct dvb_usb_adapter *adap)
 	m88ds3103_pdata.lnb_hv_pol = 1;
 	m88ds3103_pdata.lnb_en_pol = 0;
 	memset(&board_info, 0, sizeof(board_info));
-	strscpy(board_info.type, "m88ds3103", I2C_NAME_SIZE);
-	board_info.addr = 0x68;
+	if(demod_addr == 0x6a)
+		strscpy(board_info.type, "m88ds3103b", I2C_NAME_SIZE);
+	else
+		strscpy(board_info.type, "m88ds3103", I2C_NAME_SIZE);
+	board_info.addr = demod_addr;
 	board_info.platform_data = &m88ds3103_pdata;
+
+	info("%s: attaching demodulator of type %s at i2c address 0x%x", __func__, board_info.type, board_info.addr);
+
 	request_module("m88ds3103");
 	client = i2c_new_device(&d->i2c_adap, &board_info);
 	if (client == NULL || client->dev.driver == NULL)
