@@ -1069,20 +1069,37 @@ err:
 	return 0;
 }
 
-static int mxl692_read_status(struct dvb_frontend *fe,
-				 enum fe_status *status)
+static int mxl692_get_frontend(struct dvb_frontend *fe,
+				  struct dtv_frontend_properties *p)
 {
 	struct mxl692_dev *dev = fe->demodulator_priv;
+	struct dtv_frontend_properties *c = &fe->dtv_property_cache;
+
+	p->modulation = c->modulation;
+	p->frequency = c->frequency;
+/*
+	p->cnr = c->cnr;
+	p->post_bit_count = c->post_bit_count;
+	p->post_bit_error = c->post_bit_error;
+	p->block_error = c->block_error;
+*/
+	return 0;
+}
+
+static int mxl692_read_snr(struct dvb_frontend *fe, u16 *snr)
+{
+	struct mxl692_dev *dev = fe->demodulator_priv;
+	struct dtv_frontend_properties *c = &fe->dtv_property_cache;
 	u8 rxBuffer[MXL_EAGLE_MAX_I2C_PACKET_SIZE] = {};
 	struct MXL_EAGLE_ATSC_DEMOD_STATUS_T *atscStatusStruct;
-//	struct MXL_EAGLE_QAM_DEMOD_STATUS_T *qamStatusStruct;
-	int mxl_status = 0;
+	struct MXL_EAGLE_QAM_DEMOD_STATUS_T *qamStatusStruct;
 	enum MXL_EAGLE_DEMOD_TYPE_E demodType = dev->demodType;
-	int ret = 0;
-	*status = 0;
+	int mxl_status = 0;
+	*snr = 0;
 
 	pr_debug("%s()\n", __func__);
 	atscStatusStruct = (struct MXL_EAGLE_ATSC_DEMOD_STATUS_T*)&rxBuffer;
+	qamStatusStruct = (struct MXL_EAGLE_QAM_DEMOD_STATUS_T*)&rxBuffer;
 
 	switch(demodType)
 	{
@@ -1091,14 +1108,71 @@ static int mxl692_read_status(struct dvb_frontend *fe,
 						  MXL_EAGLE_OPCODE_ATSC_STATUS_GET,
 						  NULL,
 						  0,
-						  (u8*)atscStatusStruct,
+						  rxBuffer,
 						  sizeof(struct MXL_EAGLE_ATSC_DEMOD_STATUS_T));
-		if(!mxl_status && atscStatusStruct->isAtscLock) {
-			*status |= FE_HAS_SIGNAL;
-			*status |= FE_HAS_CARRIER;
-			*status |= FE_HAS_VITERBI;
-			*status |= FE_HAS_SYNC;
-			*status |= FE_HAS_LOCK;
+		if(!mxl_status) {
+			*snr = (u16)(atscStatusStruct->snrDbTenths / 10);
+			c->cnr.stat[0].scale = FE_SCALE_DECIBEL;
+			c->cnr.stat[0].svalue = *snr;
+		}
+		break;
+	case MXL_EAGLE_DEMOD_TYPE_QAM:
+		mxl_status = mxl692_i2c_writeread(dev,
+					    MXL_EAGLE_OPCODE_QAM_STATUS_GET,
+					    NULL,
+					    0,
+					    rxBuffer,
+					    sizeof(struct MXL_EAGLE_QAM_DEMOD_STATUS_T));
+		if(!mxl_status)
+			*snr = (u16)(qamStatusStruct->snrDbTenth / 10);
+		break;
+	case MXL_EAGLE_DEMOD_TYPE_OOB:
+	default:
+		break;
+	}
+	return 0;
+}
+
+static int mxl692_read_ber_ucb(struct dvb_frontend *fe)
+{
+	struct mxl692_dev *dev = fe->demodulator_priv;
+	struct dtv_frontend_properties *c = &fe->dtv_property_cache;
+	u8 rxBuffer[MXL_EAGLE_MAX_I2C_PACKET_SIZE] = {};
+	struct MXL_EAGLE_QAM_DEMOD_ERROR_COUNTERS_T *qamErrCounts;
+	struct MXL_EAGLE_ATSC_DEMOD_ERROR_COUNTERS_T *atscErrCounts;
+	enum MXL_EAGLE_DEMOD_TYPE_E demodType = dev->demodType;
+	int mxl_status = 0;
+	u32 utmp;
+
+	pr_debug("%s()\n", __func__);
+	qamErrCounts = (struct MXL_EAGLE_QAM_DEMOD_ERROR_COUNTERS_T*)&rxBuffer;
+	atscErrCounts = (struct MXL_EAGLE_ATSC_DEMOD_ERROR_COUNTERS_T*)&rxBuffer;
+
+	switch(demodType)
+	{
+	case MXL_EAGLE_DEMOD_TYPE_ATSC:
+		mxl_status = mxl692_i2c_writeread(dev,
+						  MXL_EAGLE_OPCODE_ATSC_ERROR_COUNTERS_GET,
+						  NULL,
+						  0,
+						  rxBuffer,
+						  sizeof(struct MXL_EAGLE_ATSC_DEMOD_ERROR_COUNTERS_T));
+		if(!mxl_status) {
+			if (atscErrCounts->errorPackets == 0)
+				utmp = 0;
+			else
+				utmp = ((atscErrCounts->errorBytes / atscErrCounts->errorPackets) *
+					atscErrCounts->totalPackets);
+			/* ber */
+			c->post_bit_error.stat[0].scale = FE_SCALE_COUNTER;
+			c->post_bit_error.stat[0].uvalue += atscErrCounts->errorBytes;
+			c->post_bit_count.stat[0].scale = FE_SCALE_COUNTER;
+			c->post_bit_count.stat[0].uvalue += utmp;
+			/* ucb */
+			c->block_error.stat[0].scale = FE_SCALE_COUNTER;
+			c->block_error.stat[0].uvalue += atscErrCounts->errorPackets;
+
+			pr_err("%s() %u   %u\n", __func__, c->post_bit_count.stat[0].uvalue, c->block_error.stat[0].uvalue);
 		}
 		break;
 	case MXL_EAGLE_DEMOD_TYPE_QAM:
@@ -1106,21 +1180,27 @@ static int mxl692_read_status(struct dvb_frontend *fe,
 	default:
 		break;
 	}
-
-	return ret;
+	return 0;
 }
 
-static int mxl692_read_snr(struct dvb_frontend *fe, u16 *snr)
+static int mxl692_read_status(struct dvb_frontend *fe,
+				 enum fe_status *status)
 {
 	struct mxl692_dev *dev = fe->demodulator_priv;
+	struct dtv_frontend_properties *c = &fe->dtv_property_cache;
 	u8 rxBuffer[MXL_EAGLE_MAX_I2C_PACKET_SIZE] = {};
 	struct MXL_EAGLE_ATSC_DEMOD_STATUS_T *atscStatusStruct;
-//	struct MXL_EAGLE_QAM_DEMOD_STATUS_T *qamStatusStruct = &rxBuffer;
-	int mxl_status = 0;
+	struct MXL_EAGLE_QAM_DEMOD_STATUS_T *qamStatusStruct;
 	enum MXL_EAGLE_DEMOD_TYPE_E demodType = dev->demodType;
+	int mxl_status = 0;
+	int ret = 0;
+	u16 snr = 0;
+	u32 ber = 0, ucb = 0;
+	*status = 0;
 
-	pr_err("%s()\n", __func__);
+	pr_debug("%s()\n", __func__);
 	atscStatusStruct = (struct MXL_EAGLE_ATSC_DEMOD_STATUS_T*)&rxBuffer;
+	qamStatusStruct = (struct MXL_EAGLE_QAM_DEMOD_STATUS_T*)&rxBuffer;
 
 	switch(demodType)
 	{
@@ -1129,17 +1209,55 @@ static int mxl692_read_snr(struct dvb_frontend *fe, u16 *snr)
 						  MXL_EAGLE_OPCODE_ATSC_STATUS_GET,
 						  NULL,
 						  0,
-						  (u8*)atscStatusStruct,
+						  rxBuffer,
 						  sizeof(struct MXL_EAGLE_ATSC_DEMOD_STATUS_T));
-		if(!mxl_status)
-			*snr = (u16)(atscStatusStruct->snrDbTenths / 10);
+		if(!mxl_status && atscStatusStruct->isAtscLock) {
+			*status |= FE_HAS_SIGNAL;
+			*status |= FE_HAS_CARRIER;
+			*status |= FE_HAS_VITERBI;
+			*status |= FE_HAS_SYNC;
+			*status |= FE_HAS_LOCK;
+
+			c->cnr.stat[0].scale = FE_SCALE_DECIBEL;
+			c->cnr.stat[0].svalue = atscStatusStruct->snrDbTenths / 10;
+		}
 		break;
 	case MXL_EAGLE_DEMOD_TYPE_QAM:
+		mxl_status = mxl692_i2c_writeread(dev,
+					    MXL_EAGLE_OPCODE_QAM_STATUS_GET,
+					    NULL,
+					    0,
+					    rxBuffer,
+					    sizeof(struct MXL_EAGLE_QAM_DEMOD_STATUS_T));
+		if(!mxl_status && qamStatusStruct->isQamLocked) {
+			*status |= FE_HAS_SIGNAL;
+			*status |= FE_HAS_CARRIER;
+			*status |= FE_HAS_VITERBI;
+			*status |= FE_HAS_SYNC;
+			*status |= FE_HAS_LOCK;
+
+			c->cnr.stat[0].scale = FE_SCALE_DECIBEL;
+			c->cnr.stat[0].svalue = qamStatusStruct->snrDbTenth / 10;
+		}
+		break;
 	case MXL_EAGLE_DEMOD_TYPE_OOB:
 	default:
 		break;
 	}
-	return 0;
+
+	if ((*status & FE_HAS_LOCK) == 0) {
+		/* No lock, reset all statistics */
+		c->cnr.len = 1;
+		c->cnr.stat[0].scale = FE_SCALE_NOT_AVAILABLE;
+		c->block_error.stat[0].scale = FE_SCALE_NOT_AVAILABLE;
+		c->post_bit_error.stat[0].scale = FE_SCALE_NOT_AVAILABLE;
+		c->post_bit_count.stat[0].scale = FE_SCALE_NOT_AVAILABLE;
+		return 0;
+	}
+
+	ret = mxl692_read_ber_ucb(fe);
+err:
+	return ret;
 }
 
 static const struct dvb_frontend_ops mxl692_ops = {
@@ -1152,11 +1270,13 @@ static const struct dvb_frontend_ops mxl692_ops = {
 		.caps = FE_CAN_QAM_AUTO | FE_CAN_QAM_64 | FE_CAN_QAM_256 | FE_CAN_8VSB
 	},
 
-	.init = mxl692_init,
-	.sleep = mxl692_sleep,
+	.init         = mxl692_init,
+	.sleep        = mxl692_sleep,
 	.set_frontend = mxl692_set_frontend,
-	.read_status = mxl692_read_status,
-	.read_snr = mxl692_read_snr,
+	.get_frontend = mxl692_get_frontend,
+
+	.read_status          = mxl692_read_status,
+	.read_snr             = mxl692_read_snr,
 };
 
 static int mxl692_probe(struct i2c_client *client,
