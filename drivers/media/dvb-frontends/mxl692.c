@@ -843,24 +843,25 @@ static int mxl692_init(struct dvb_frontend *fe)
 {
 	struct mxl692_dev *dev = fe->demodulator_priv;
 	struct i2c_client *client = dev->i2c_client;
+	struct dtv_frontend_properties *c = &fe->dtv_property_cache;
 	int status = 0;
 	const struct firmware *firmware;
 	struct MXL_EAGLE_DEV_XTAL_T devXtalConfig = {};
 
 	if(dev->init_done)
-		return 0;
+		goto warm;
 
 	dev->seqNum = 1;
 
 	status = mxl692_reset(dev);
 	if(status != 0)
-	    return -EREMOTEIO;
+		goto err;
 
 	usleep_range(100 * 1000, 110 * 1000); /* was 1000! */
 
 	status = mxl692_config_regulators(dev, MXL_EAGLE_POWER_SUPPLY_SOURCE_DUAL);
 	if(status != 0)
-	    return -EREMOTEIO;
+		goto err;
 
 	devXtalConfig.xtalCap = 26;
 	devXtalConfig.clkOutDivEnable = 0;
@@ -869,27 +870,42 @@ static int mxl692_init(struct dvb_frontend *fe)
 	devXtalConfig.xtalSharingEnable = 1;
 	status = mxl692_config_xtal(dev, &devXtalConfig);
 	if(status != 0)
-		return -EREMOTEIO;
+		goto err;
 
 	status = request_firmware(&firmware, MXL692_FIRMWARE, &client->dev);
 	if (status) {
 		pr_err("%s() firmware missing? %s\n", __func__, MXL692_FIRMWARE);
-		return -ENODEV;
+		goto err;
 	}
 
 	status = mxl692_fwdownload(dev, firmware->data, firmware->size);
-	if(status != 0)
-	    return -EREMOTEIO;
+	if(status != 0) {
+		goto err_release_firmware;
+	}
 
 	release_firmware(firmware);
 
 	usleep_range(500 * 1000, 510 * 1000); /* was 1000! */
 	status = mxl692_get_versions(dev);
 	if(status != 0)
-	    return -EREMOTEIO;
+		goto err;
+warm:
+        /* Init stats here to indicate which stats are supported */
+        c->cnr.len = 1;
+        c->cnr.stat[0].scale = FE_SCALE_NOT_AVAILABLE;
+        c->post_bit_error.len = 1;
+        c->post_bit_error.stat[0].scale = FE_SCALE_NOT_AVAILABLE;
+        c->post_bit_count.len = 1;
+        c->post_bit_count.stat[0].scale = FE_SCALE_NOT_AVAILABLE;
+        c->block_error.len = 1;
+        c->block_error.stat[0].scale = FE_SCALE_NOT_AVAILABLE;
 
 	dev->init_done = 1;
 	return 0;
+err_release_firmware:
+	release_firmware(firmware);
+err:
+	return status;
 }
 
 static int mxl692_sleep(struct dvb_frontend *fe)
