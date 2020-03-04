@@ -925,8 +925,8 @@ static int mxl692_set_frontend(struct dvb_frontend *fe)
 	enum MXL_EAGLE_DEMOD_TYPE_E demodType;
 	enum MXL_EAGLE_POWER_MODE_E powerMode = MXL_EAGLE_POWER_MODE_ACTIVE;
 	struct MXL_EAGLE_MPEGOUT_PARAMS_T mpegOutParams = {};
-	enum MXL_EAGLE_QAM_DEMOD_ANNEX_TYPE_E qamAnnexType = MXL_EAGLE_QAM_DEMOD_ANNEX_A;
-//	struct MXL_EAGLE_QAM_DEMOD_PARAMS_T qamParamsStruct = {};
+	enum MXL_EAGLE_QAM_DEMOD_ANNEX_TYPE_E qamAnnexType = MXL_EAGLE_QAM_DEMOD_ANNEX_B;
+	struct MXL_EAGLE_QAM_DEMOD_PARAMS_T qamParamsStruct = {};
 	struct MXL_EAGLE_TUNER_CHANNEL_PARAMS_T tunerChannelParams = {};
 
 	switch (p->modulation) {
@@ -999,6 +999,26 @@ static int mxl692_set_frontend(struct dvb_frontend *fe)
 					      0);
 		if(status != 0)
 			goto err;
+
+		qamParamsStruct.annexType = qamAnnexType;
+		qamParamsStruct.qamType = MXL_EAGLE_QAM_DEMOD_AUTO;
+		qamParamsStruct.iqFlip = MXL_EAGLE_DEMOD_IQ_AUTO;
+		if (p->modulation == QAM_64)
+			qamParamsStruct.symbolRateHz = 5057000;
+		else
+			qamParamsStruct.symbolRateHz = 5361000;
+
+		qamParamsStruct.symbolRate256QamHz = 5361000;
+
+		status = mxl692_i2c_writeread(dev,
+					      MXL_EAGLE_OPCODE_QAM_PARAMS_SET,
+					      (u8*)&qamParamsStruct,
+					      sizeof(struct MXL_EAGLE_QAM_DEMOD_PARAMS_T),
+					      NULL, 0);
+		if(status != 0)
+			goto err;
+
+		pr_err("%s() QAM\n", __func__);
 		break;
 	default:
 		break;
@@ -1028,6 +1048,13 @@ static int mxl692_set_frontend(struct dvb_frontend *fe)
 	case MXL_EAGLE_DEMOD_TYPE_ATSC:
 		status = mxl692_i2c_writeread(dev,
 					      MXL_EAGLE_OPCODE_ATSC_INIT_SET,
+					      NULL, 0, NULL, 0);
+		if(status != 0)
+			goto err;
+		break;
+	case MXL_EAGLE_DEMOD_TYPE_QAM:
+		status = mxl692_i2c_writeread(dev,
+					      MXL_EAGLE_OPCODE_QAM_RESTART_SET,
 					      NULL, 0, NULL, 0);
 		if(status != 0)
 			goto err;
@@ -1116,13 +1143,13 @@ static int mxl692_read_snr(struct dvb_frontend *fe, u16 *snr)
 }
 
 static const struct dvb_frontend_ops mxl692_ops = {
-	.delsys = { SYS_ATSC },
+	.delsys = { SYS_ATSC, SYS_DVBC_ANNEX_B },
 	.info = {
 		.name = "MaxLinear mxl692 VSB Frontend",
 		.frequency_min_hz      = 54000000,
 		.frequency_max_hz      = 858000000,
 		.frequency_stepsize_hz = 62500,
-		.caps = FE_CAN_8VSB
+		.caps = FE_CAN_QAM_AUTO | FE_CAN_QAM_64 | FE_CAN_QAM_256 | FE_CAN_8VSB
 	},
 
 	.init = mxl692_init,
