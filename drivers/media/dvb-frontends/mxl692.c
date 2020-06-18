@@ -905,8 +905,16 @@ static int mxl692_init(struct dvb_frontend *fe)
 		goto err;
 
 	dev->power_mode = MXL_EAGLE_POWER_MODE_SLEEP;
-
 warm:
+	//Config Device Power Mode
+	if (dev->power_mode != MXL_EAGLE_POWER_MODE_ACTIVE) {
+		status = mxl692_powermode(dev, MXL_EAGLE_POWER_MODE_ACTIVE);
+		if (status)
+			goto err;
+
+		usleep_range(50 * 1000, 60 * 1000); /* was 500! */
+	}
+
 	/* Init stats here to indicate which stats are supported */
 	c->cnr.len = 1;
 	c->cnr.stat[0].scale = FE_SCALE_NOT_AVAILABLE;
@@ -982,15 +990,6 @@ static int mxl692_set_frontend(struct dvb_frontend *fe)
 	}
 
 	usleep_range(20 * 1000, 30 * 1000); /* was 500! */
-
-	//Config Device Power Mode
-	if (dev->power_mode != MXL_EAGLE_POWER_MODE_ACTIVE) {
-		status = mxl692_powermode(dev, power_mode);
-		if (status)
-			goto err;
-
-		usleep_range(50 * 1000, 60 * 1000); /* was 500! */
-	}
 
 	mpeg_params.mpeg_parallel = 0;
 	mpeg_params.msb_first = MXL_EAGLE_DATA_SERIAL_MSB_1ST;
