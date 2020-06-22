@@ -54,7 +54,7 @@ static int mxl692_i2c_write(struct mxl692_dev *dev, u8 *buffer, u16 buf_len)
 
 	ret = i2c_transfer(dev->i2c_client->adapter, &msg, 1);
 	if (ret != 1)
-		dev_err(&dev->i2c_client->dev, "i2c write error!\n");
+		dev_dbg(&dev->i2c_client->dev, "i2c write error!\n");
 
 	return ret;
 }
@@ -71,7 +71,7 @@ static int mxl692_i2c_read(struct mxl692_dev *dev, u8 *buffer, u16 buf_len)
 
 	ret = i2c_transfer(dev->i2c_client->adapter, &msg, 1);
 	if (ret != 1)
-		dev_err(&dev->i2c_client->dev, "i2c read error!\n");
+		dev_dbg(&dev->i2c_client->dev, "i2c read error!\n");
 
 	return ret;
 }
@@ -312,7 +312,7 @@ static int mxl692_write_fw_block(struct mxl692_dev *dev, const u8 *buffer,
 	}
 
 	if (status)
-		dev_err(&dev->i2c_client->dev, "err %d\n", status);
+		dev_dbg(&dev->i2c_client->dev, "err %d\n", status);
 
 	return status;
 }
@@ -349,7 +349,7 @@ static int mxl692_memwrite(struct mxl692_dev *dev, u32 addr,
 
 	return status;
 err_finish:
-	dev_err(&dev->i2c_client->dev, "err %d\n", status);
+	dev_dbg(&dev->i2c_client->dev, "err %d\n", status);
 	return status;
 }
 
@@ -368,6 +368,8 @@ static int mxl692_memread(struct mxl692_dev *dev, u32 addr,
 	if (g_big_endian)
 		convert_endian(sizeof(u32), plocal_buf);
 
+	mutex_lock(&dev->i2c_lock);
+
 	if (mxl692_i2c_write(dev, local_buf, MXL_EAGLE_I2C_MHEADER_SIZE) > 0) {
 		size = (size + 3) & ~3;  /* 4 byte alignment */
 		status = mxl692_i2c_read(dev, buffer, (u16)size) < 0 ?
@@ -379,8 +381,10 @@ static int mxl692_memread(struct mxl692_dev *dev, u32 addr,
 		status = -EREMOTEIO;
 	}
 
+	mutex_unlock(&dev->i2c_lock);
+
 	if (status)
-		dev_err(&dev->i2c_client->dev, "err %d\n", status);
+		dev_dbg(&dev->i2c_client->dev, "err %d\n", status);
 
 	return status;
 }
@@ -412,7 +416,7 @@ static int mxl692_opwrite(struct mxl692_dev *dev, u8 *buffer,
 	}
 err_finish:
 	if (status)
-		dev_err(&dev->i2c_client->dev, "err %d\n", status);
+		dev_dbg(&dev->i2c_client->dev, "err %d\n", status);
 	return status;
 }
 
@@ -444,7 +448,7 @@ static int mxl692_opread(struct mxl692_dev *dev, u8 *buffer,
 	}
 err_finish:
 	if (status)
-		dev_err(&dev->i2c_client->dev, "err %d\n", status);
+		dev_dbg(&dev->i2c_client->dev, "err %d\n", status);
 	return status;
 }
 
@@ -557,7 +561,7 @@ static int mxl692_i2c_writeread(struct mxl692_dev *dev,
 	}
 err_finish:
 	if (status)
-		dev_err(&dev->i2c_client->dev, "err %d\n", status);
+		dev_dbg(&dev->i2c_client->dev, "err %d\n", status);
 
 	mutex_unlock(&dev->i2c_lock);
 	return status;
@@ -615,7 +619,7 @@ static int mxl692_fwdownload(struct mxl692_dev *dev,
 err_finish:
 	mutex_unlock(&dev->i2c_lock);
 	if (status)
-		dev_err(&dev->i2c_client->dev, "err %d\n", status);
+		dev_dbg(&dev->i2c_client->dev, "err %d\n", status);
 	return status;
 }
 
@@ -669,7 +673,7 @@ static int mxl692_reset(struct mxl692_dev *dev)
 
 err_finish:
 	if (status)
-		dev_err(&dev->i2c_client->dev, "err %d\n", status);
+		dev_dbg(&dev->i2c_client->dev, "err %d\n", status);
 	return status;
 }
 
@@ -705,7 +709,7 @@ static int mxl692_config_regulators(struct mxl692_dev *dev,
 
 err_finish:
 	if (status)
-		dev_err(&dev->i2c_client->dev, "err %d\n", status);
+		dev_dbg(&dev->i2c_client->dev, "err %d\n", status);
 	return status;
 }
 
@@ -824,7 +828,7 @@ static int mxl692_config_xtal(struct mxl692_dev *dev,
 
 err_finish:
 	if (status)
-		dev_err(&dev->i2c_client->dev, "err %d\n", status);
+		dev_dbg(&dev->i2c_client->dev, "err %d\n", status);
 	return status;
 }
 
@@ -843,8 +847,10 @@ static int mxl692_powermode(struct mxl692_dev *dev,
 				      sizeof(u8),
 				      NULL,
 				      0);
-	if (status)
-		dev_err(&dev->i2c_client->dev, "err %d\n", status);
+	if (status) {
+		dev_dbg(&dev->i2c_client->dev, "err %d\n", status);
+		return status;
+	}
 
 	dev->power_mode = power_mode;
 
@@ -930,6 +936,7 @@ warm:
 err_release_firmware:
 	release_firmware(firmware);
 err:
+	dev_dbg(&dev->i2c_client->dev, "err %d\n", status);
 	return status;
 }
 
@@ -972,8 +979,10 @@ static int mxl692_set_frontend(struct dvb_frontend *fe)
 		return -EINVAL;
 	}
 
-	if (dev->current_frequency == p->frequency && dev->demod_type == demod_type)
+	if (dev->current_frequency == p->frequency && dev->demod_type == demod_type) {
+		dev_dbg(&dev->i2c_client->dev, "already set up\n");
 		return 0;
+	}
 
 	dev->current_frequency = -1;
 	dev->demod_type = -1;
@@ -1087,8 +1096,11 @@ static int mxl692_set_frontend(struct dvb_frontend *fe)
 
 	dev->demod_type = demod_type;
 	dev->current_frequency = p->frequency;
-err:
+
 	return 0;
+err:
+	dev_dbg(&dev->i2c_client->dev, "err %d\n", status);
+	return status;
 }
 
 static int mxl692_get_frontend(struct dvb_frontend *fe,
@@ -1147,6 +1159,9 @@ static int mxl692_read_snr(struct dvb_frontend *fe, u16 *snr)
 	default:
 		break;
 	}
+
+	if (mxl_status)
+		dev_dbg(&dev->i2c_client->dev, "err %d\n", mxl_status);
 	return 0;
 }
 
@@ -1198,6 +1213,10 @@ static int mxl692_read_ber_ucb(struct dvb_frontend *fe)
 	default:
 		break;
 	}
+
+	if (mxl_status)
+		dev_dbg(&dev->i2c_client->dev, "err %d\n", mxl_status);
+
 	return 0;
 }
 
@@ -1271,7 +1290,7 @@ static int mxl692_read_status(struct dvb_frontend *fe,
 	}
 
 	if (mxl_status)
-		dev_err(&dev->i2c_client->dev, "err %d\n", mxl_status);
+		dev_dbg(&dev->i2c_client->dev, "err %d\n", mxl_status);
 	else
 		mxl_status = mxl692_read_ber_ucb(fe);
 
@@ -1307,7 +1326,7 @@ static int mxl692_probe(struct i2c_client *client,
 	dev = kzalloc(sizeof(*dev), GFP_KERNEL);
 	if (!dev) {
 		ret = -ENOMEM;
-		dev_err(&client->dev, "kzalloc() failed\n");
+		dev_dbg(&client->dev, "kzalloc() failed\n");
 		goto err;
 	}
 
@@ -1323,7 +1342,7 @@ static int mxl692_probe(struct i2c_client *client,
 
 	return 0;
 err:
-	dev_err(&client->dev, "failed %d\n", ret);
+	dev_dbg(&client->dev, "failed %d\n", ret);
 	return -ENODEV;
 }
 
