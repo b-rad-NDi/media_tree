@@ -521,6 +521,7 @@ static int mxl692_i2c_writeread(struct mxl692_dev *dev,
 	}
 
 	if (rx_header->status) {
+		dev_dbg(&dev->i2c_client->dev, "rx header status code: %d\n", rx_header->status);
 		status = -EREMOTEIO;
 		goto err_finish;
 	}
