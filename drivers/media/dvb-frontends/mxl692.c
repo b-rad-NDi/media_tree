@@ -521,7 +521,7 @@ static int mxl692_i2c_writeread(struct mxl692_dev *dev,
 	}
 
 	if (rx_header->status) {
-		status = (int)rx_header->status;
+		status = -EREMOTEIO;
 		goto err_finish;
 	}
 
