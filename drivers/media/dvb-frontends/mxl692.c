@@ -555,6 +555,7 @@ static int mxl692_i2c_writeread(struct mxl692_dev *dev,
 				MXL_EAGLE_HOST_MSG_HEADER_SIZE + rx_header->payload_size);
 
 	if (resp_checksum != resp_checksum_tmp) {
+		dev_dbg(&dev->i2c_client->dev, "rx checksum failure\n");
 		status = -EREMOTEIO;
 		goto err_finish;
 	}
@@ -563,6 +564,7 @@ static int mxl692_i2c_writeread(struct mxl692_dev *dev,
 
 	if (rx_header->payload_size > 0) {
 		if (!rx_payload) {
+			dev_dbg(&dev->i2c_client->dev, "no rx payload?!?\n");
 			status = -EREMOTEIO;
 			goto err_finish;
 		}
@@ -1172,7 +1174,7 @@ static int mxl692_read_snr(struct dvb_frontend *fe, u16 *snr)
 
 	if (mxl_status)
 		dev_dbg(&dev->i2c_client->dev, "err %d\n", mxl_status);
-	return 0;
+	return mxl_status;
 }
 
 static int mxl692_read_ber_ucb(struct dvb_frontend *fe)
@@ -1227,7 +1229,7 @@ static int mxl692_read_ber_ucb(struct dvb_frontend *fe)
 	if (mxl_status)
 		dev_dbg(&dev->i2c_client->dev, "err %d\n", mxl_status);
 
-	return 0;
+	return mxl_status;
 }
 
 static int mxl692_read_status(struct dvb_frontend *fe,
