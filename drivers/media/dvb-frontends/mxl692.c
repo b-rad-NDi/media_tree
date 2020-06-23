@@ -389,11 +389,19 @@ static int mxl692_memread(struct mxl692_dev *dev, u32 addr,
 	return status;
 }
 
+static const char* mxl692_opcode_string(u8 opcode)
+{
+	if (opcode >= 0 && opcode <= MXL_EAGLE_OPCODE_INTERNAL)
+		return MXL_EAGLE_OPCODE_STRING[opcode];
+
+	return "invalid opcode";
+}
 static int mxl692_opwrite(struct mxl692_dev *dev, u8 *buffer,
 			  u32 size)
 {
 	int status = 0, total_len = 0;
 	u8 local_buf[MXL_EAGLE_MAX_I2C_PACKET_SIZE] = {}, *plocal_buf = NULL;
+	struct MXL_EAGLE_HOST_MSG_HEADER_T *tx_hdr = (struct MXL_EAGLE_HOST_MSG_HEADER_T *)buffer;
 
 	total_len = size;
 	total_len = (total_len + 3) & ~3;  /* 4 byte alignment */
@@ -416,7 +424,8 @@ static int mxl692_opwrite(struct mxl692_dev *dev, u8 *buffer,
 	}
 err_finish:
 	if (status)
-		dev_dbg(&dev->i2c_client->dev, "err %d\n", status);
+		dev_dbg(&dev->i2c_client->dev, "opcode %s  err %d\n",
+			mxl692_opcode_string(tx_hdr->opcode), status);
 	return status;
 }
 
