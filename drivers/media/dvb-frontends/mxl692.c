@@ -969,7 +969,6 @@ static int mxl692_set_frontend(struct dvb_frontend *fe)
 
 	int status = 0;
 	enum MXL_EAGLE_DEMOD_TYPE_E demod_type;
-	enum MXL_EAGLE_POWER_MODE_E power_mode = MXL_EAGLE_POWER_MODE_ACTIVE;
 	struct MXL_EAGLE_MPEGOUT_PARAMS_T mpeg_params = {};
 	enum MXL_EAGLE_QAM_DEMOD_ANNEX_TYPE_E qam_annex = MXL_EAGLE_QAM_DEMOD_ANNEX_B;
 	struct MXL_EAGLE_QAM_DEMOD_PARAMS_T qam_params = {};
