@@ -26,8 +26,6 @@
 #include "mxl692.h"
 #include "mxl692_defs.h"
 
-static int g_big_endian = -1;
-
 static const struct dvb_frontend_ops mxl692_ops;
 
 struct mxl692_dev {
@@ -76,19 +74,6 @@ static int mxl692_i2c_read(struct mxl692_dev *dev, u8 *buffer, u16 buf_len)
 	return ret;
 }
 
-static void detect_endianness(void)
-{
-	u32 temp = 1;
-	u8 *p_temp = (u8 *)&temp;
-
-	g_big_endian = (*p_temp == 0) ? 1 : 0;
-
-	if (g_big_endian)
-		pr_debug("%s( BIG )\n", __func__);
-	else
-		pr_debug("%s( SMALL )\n", __func__);
-}
-
 static int convert_endian(u32 size, u8 *d)
 {
 	u32 i;
@@ -134,9 +119,9 @@ static int convert_endian_n(int n, u32 size, u8 *d)
 
 static void mxl692_tx_swap(enum MXL_EAGLE_OPCODE_E opcode, u8 *buffer)
 {
-	if (g_big_endian)
-		return;
-
+#ifdef __BIG_ENDIAN
+	return;
+#endif
 	buffer += MXL_EAGLE_HOST_MSG_HEADER_SIZE; /* skip API header */
 
 	switch (opcode) {
@@ -158,9 +143,9 @@ static void mxl692_tx_swap(enum MXL_EAGLE_OPCODE_E opcode, u8 *buffer)
 
 static void mxl692_rx_swap(enum MXL_EAGLE_OPCODE_E opcode, u8 *buffer)
 {
-	if (g_big_endian)
-		return;
-
+#ifdef __BIG_ENDIAN
+	return;
+#endif
 	buffer += MXL_EAGLE_HOST_MSG_HEADER_SIZE; /* skip API header */
 
 	switch (opcode) {
@@ -217,51 +202,52 @@ static void mxl692_rx_swap(enum MXL_EAGLE_OPCODE_E opcode, u8 *buffer)
 
 static u32 mxl692_checksum(u8 *buffer, u32 size)
 {
-	u32 ix, remainder = 0, cur_cksum = 0;
+	u32 ix, div_size;
+	u32 cur_cksum = 0;
+	__be32 *buf;
 
-	for (ix = 0; ix < size / 4; ix++)
-		cur_cksum += cpu_to_be32(*(u32 *)(buffer +
-					 (ix * sizeof(u32))));
-	remainder = size % 4;
-	if (remainder > 0)
-		cur_cksum += cpu_to_be32(*((u32 *)&buffer[size - remainder]));
+	div_size = DIV_ROUND_UP(size, 4);
+
+	buf = (__be32*)buffer;
+	for (ix = 0; ix < div_size; ix++)
+		cur_cksum += be32_to_cpu(buf[ix]);
 
 	cur_cksum ^= 0xDEADBEEF;
 
-	return be32_to_cpu(cur_cksum);
+	return cur_cksum;
 }
 
-static int mxl692_validate_fw_header(const u8 *buffer, u32 buf_len)
+static int mxl692_validate_fw_header(struct mxl692_dev *dev,
+				     const u8 *buffer, u32 buf_len)
 {
 	int status = 0;
-	u32 ix, temp = 0;
-	u32 *local_buf = NULL;
+	u32 ix, temp;
+	__be32 *local_buf = NULL;
+	u8 temp_cksum = 0;
+	const u8 fw_hdr[] = { 0x4D, 0x31, 0x10, 0x02, 0x40, 0x00, 0x00, 0x80 };
 
-	if (buffer[0] != 0x4D || buffer[1] != 0x31 ||
-	    buffer[2] != 0x10 || buffer[3] != 0x02 ||
-	    buffer[4] != 0x40 || buffer[5] != 0x00 ||
-	    buffer[6] != 0x00 || buffer[7] != 0x80) {
+	if (memcmp(buffer, fw_hdr, 8) != 0) {
 		status = -EINVAL;
 		goto err_finish;
 	}
 
-	local_buf = (u32 *)(buffer + 8);
-	temp = cpu_to_be32(*(u32 *)local_buf);
+	local_buf = (__be32 *)(buffer + 8);
+	temp = be32_to_cpu(*local_buf);
 
-	if ((buf_len - 16) != (temp >> 8)) {
+	if ((buf_len - 16) != temp >> 8) {
 		status = -EINVAL;
 		goto err_finish;
 	}
 
-	temp = 0;
 	for (ix = 16; ix < buf_len; ix++)
-		temp += buffer[ix];
+		temp_cksum += buffer[ix];
 
-	if ((u8)temp != buffer[11])
+	if (temp_cksum != buffer[11]) {
 		status = -EINVAL;
+	}
 err_finish:
 	if (status)
-		pr_err("%s failed! %d\n", __func__, status);
+		dev_dbg(&dev->i2c_client->dev, "failed\n");
 	return status;
 }
 
@@ -290,12 +276,14 @@ static int mxl692_write_fw_block(struct mxl692_dev *dev, const u8 *buffer,
 			*plocal_buf++ = 0xFC;
 			*plocal_buf++ = chunk_len + sizeof(u32);
 
-			*(u32 *)plocal_buf = cpu_to_le32(addr + prevchunk_len);
+			*(u32 *)plocal_buf = addr + prevchunk_len;
+#ifdef __BIG_ENDIAN
+			convert_endian(sizeof(u32), plocal_buf);
+#endif
 			plocal_buf += sizeof(u32);
 
 			memcpy(plocal_buf, &buffer[ix], chunk_len);
 			convert_endian(chunk_len, plocal_buf);
-
 			if (mxl692_i2c_write(dev, local_buf,
 			    (chunk_len + MXL_EAGLE_I2C_MHEADER_SIZE)) < 0) {
 				status = -EREMOTEIO;
@@ -338,9 +326,9 @@ static int mxl692_memwrite(struct mxl692_dev *dev, u32 addr,
 	plocal_buf += sizeof(u32);
 
 	memcpy(plocal_buf, buffer, total_len);
-	if (g_big_endian)
-		convert_endian(sizeof(u32) + total_len, local_buf + 2);
-
+#ifdef __BIG_ENDIAN
+	convert_endian(sizeof(u32) + total_len, local_buf + 2);
+#endif
 	if (mxl692_i2c_write(dev, local_buf,
 	    (total_len + MXL_EAGLE_I2C_MHEADER_SIZE)) < 0) {
 		status = -EREMOTEIO;
@@ -364,19 +352,19 @@ static int mxl692_memread(struct mxl692_dev *dev, u32 addr,
 	*plocal_buf++ = 0xFB;
 	*plocal_buf++ = sizeof(u32);
 	*(u32 *)plocal_buf = addr;
-
-	if (g_big_endian)
-		convert_endian(sizeof(u32), plocal_buf);
-
+#ifdef __BIG_ENDIAN
+	convert_endian(sizeof(u32), plocal_buf);
+#endif
 	mutex_lock(&dev->i2c_lock);
 
 	if (mxl692_i2c_write(dev, local_buf, MXL_EAGLE_I2C_MHEADER_SIZE) > 0) {
 		size = (size + 3) & ~3;  /* 4 byte alignment */
 		status = mxl692_i2c_read(dev, buffer, (u16)size) < 0 ?
 					 -EREMOTEIO : 0;
-
-		if (status == 0 && g_big_endian)
+#ifdef __BIG_ENDIAN
+		if (status == 0)
 			convert_endian(size, buffer);
+#endif
 	} else {
 		status = -EREMOTEIO;
 	}
@@ -442,7 +430,7 @@ static int mxl692_opread(struct mxl692_dev *dev, u8 *buffer,
 	if (mxl692_i2c_write(dev, local_buf, MXL_EAGLE_I2C_PHEADER_SIZE) > 0) {
 		size = (size + 3) & ~3;  /* 4 byte alignment */
 
-		//read in 4 byte chunks
+		/* Read in 4 byte chunks */
 		for (ix = 0; ix < size; ix += 4) {
 			if (mxl692_i2c_read(dev, buffer + ix, 4) < 0) {
 				dev_dbg(&dev->i2c_client->dev,
@@ -484,10 +472,10 @@ static int mxl692_i2c_writeread(struct mxl692_dev *dev,
 	}
 
 	tx_header = (struct MXL_EAGLE_HOST_MSG_HEADER_T *)tx_buf;
-	tx_header->checksum = 0;
 	tx_header->opcode = opcode;
-	tx_header->payload_size = tx_payload_size;
 	tx_header->seqnum = dev->seqnum++;
+	tx_header->payload_size = tx_payload_size;
+	tx_header->checksum = 0;
 
 	if (dev->seqnum == 0)
 		dev->seqnum = 1;
@@ -501,7 +489,9 @@ static int mxl692_i2c_writeread(struct mxl692_dev *dev,
 	tx_header->checksum = 0;
 	tx_header->checksum = mxl692_checksum(tx_buf,
 				MXL_EAGLE_HOST_MSG_HEADER_SIZE + tx_payload_size);
-
+#ifdef __LITTLE_ENDIAN
+	convert_endian(4, (u8*)&tx_header->checksum); /* cksum is big endian */
+#endif
 	/* send Tx message */
 	status = mxl692_opwrite(dev, tx_buf,
 				tx_payload_size + MXL_EAGLE_HOST_MSG_HEADER_SIZE);
@@ -551,9 +541,12 @@ static int mxl692_i2c_writeread(struct mxl692_dev *dev,
 
 	resp_checksum = rx_header->checksum;
 	rx_header->checksum = 0;
+
 	resp_checksum_tmp = mxl692_checksum(rx_buf,
 				MXL_EAGLE_HOST_MSG_HEADER_SIZE + rx_header->payload_size);
-
+#ifdef __LITTLE_ENDIAN
+	convert_endian(4, (u8*)&resp_checksum_tmp); /* cksum is big endian */
+#endif
 	if (resp_checksum != resp_checksum_tmp) {
 		dev_dbg(&dev->i2c_client->dev, "rx checksum failure\n");
 		status = -EREMOTEIO;
@@ -595,7 +588,7 @@ static int mxl692_fwdownload(struct mxl692_dev *dev,
 
 	dev_dbg(&dev->i2c_client->dev, "\n");
 
-	status = mxl692_validate_fw_header(firmware_buf, buf_len);
+	status = mxl692_validate_fw_header(dev, firmware_buf, buf_len);
 	if (status)
 		goto err_finish;
 
@@ -848,6 +841,7 @@ static int mxl692_powermode(struct mxl692_dev *dev,
 			    enum MXL_EAGLE_POWER_MODE_E power_mode)
 {
 	int status = 0;
+	u8 mode = power_mode;
 
 	dev_dbg(&dev->i2c_client->dev, "%s\n",
 		power_mode == MXL_EAGLE_POWER_MODE_SLEEP ?
@@ -855,7 +849,7 @@ static int mxl692_powermode(struct mxl692_dev *dev,
 
 	status = mxl692_i2c_writeread(dev,
 				      MXL_EAGLE_OPCODE_DEVICE_POWERMODE_SET,
-				      (u8 *)&power_mode,
+				      &mode,
 				      sizeof(u8),
 				      NULL,
 				      0);
@@ -917,14 +911,13 @@ static int mxl692_init(struct dvb_frontend *fe)
 
 	release_firmware(firmware);
 
-//	usleep_range(500 * 1000, 510 * 1000); /* was 1000! */
 	status = mxl692_get_versions(dev);
 	if (status)
 		goto err;
 
 	dev->power_mode = MXL_EAGLE_POWER_MODE_SLEEP;
 warm:
-	//Config Device Power Mode
+	/* Config Device Power Mode */
 	if (dev->power_mode != MXL_EAGLE_POWER_MODE_ACTIVE) {
 		status = mxl692_powermode(dev, MXL_EAGLE_POWER_MODE_ACTIVE);
 		if (status)
@@ -973,6 +966,7 @@ static int mxl692_set_frontend(struct dvb_frontend *fe)
 	enum MXL_EAGLE_QAM_DEMOD_ANNEX_TYPE_E qam_annex = MXL_EAGLE_QAM_DEMOD_ANNEX_B;
 	struct MXL_EAGLE_QAM_DEMOD_PARAMS_T qam_params = {};
 	struct MXL_EAGLE_TUNER_CHANNEL_PARAMS_T tuner_params = {};
+	u8 op_param = 0;
 
 	dev_dbg(&dev->i2c_client->dev, "\n");
 
@@ -998,9 +992,10 @@ static int mxl692_set_frontend(struct dvb_frontend *fe)
 	dev->current_frequency = -1;
 	dev->demod_type = -1;
 
+	op_param = demod_type;
 	status = mxl692_i2c_writeread(dev,
 				      MXL_EAGLE_OPCODE_DEVICE_DEMODULATOR_TYPE_SET,
-				      (u8 *)&demod_type,
+				      &op_param,
 				      sizeof(u8),
 				      NULL,
 				      0);
@@ -1181,7 +1176,6 @@ static int mxl692_read_ber_ucb(struct dvb_frontend *fe)
 	struct mxl692_dev *dev = fe->demodulator_priv;
 	struct dtv_frontend_properties *c = &fe->dtv_property_cache;
 	u8 rx_buf[MXL_EAGLE_MAX_I2C_PACKET_SIZE] = {};
-	struct MXL_EAGLE_QAM_DEMOD_ERROR_COUNTERS_T *qam_errors;
 	struct MXL_EAGLE_ATSC_DEMOD_ERROR_COUNTERS_T *atsc_errors;
 	enum MXL_EAGLE_DEMOD_TYPE_E demod_type = dev->demod_type;
 	int mxl_status = 0;
@@ -1189,7 +1183,6 @@ static int mxl692_read_ber_ucb(struct dvb_frontend *fe)
 
 	dev_dbg(&dev->i2c_client->dev, "\n");
 
-	qam_errors = (struct MXL_EAGLE_QAM_DEMOD_ERROR_COUNTERS_T *)&rx_buf;
 	atsc_errors = (struct MXL_EAGLE_ATSC_DEMOD_ERROR_COUNTERS_T *)&rx_buf;
 
 	switch (demod_type) {
@@ -1349,7 +1342,6 @@ static int mxl692_probe(struct i2c_client *client,
 	i2c_set_clientdata(client, dev);
 
 	dev_info(&client->dev, "MaxLinear mxl692 successfully attached\n");
-	detect_endianness();
 
 	return 0;
 err:
@@ -1376,7 +1368,6 @@ MODULE_DEVICE_TABLE(i2c, mxl692_id_table);
 
 static struct i2c_driver mxl692_driver = {
 	.driver = {
-		.owner	= THIS_MODULE,
 		.name	= "mxl692",
 	},
 	.probe		= mxl692_probe,
