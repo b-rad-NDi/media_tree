@@ -113,7 +113,7 @@ enum MXL_EAGLE_OPCODE_E {
 };
 
 /* Enum of Host to Eagle I2C protocol opcodes */
-static const char* const MXL_EAGLE_OPCODE_STRING[] = {
+static const char * const MXL_EAGLE_OPCODE_STRING[] = {
 	/* DEVICE */
 	"DEVICE_DEMODULATOR_TYPE_SET",
 	"DEVICE_MPEG_OUT_PARAMS_SET",
